@@ -981,6 +981,46 @@ To be called after initial sync."
             (when-let ((child-room (cl-find child-id rooms :key #'ement-room-id :test #'equal)))
               (cl-pushnew parent-id (alist-get 'parents (ement-room-local child-room)) :test #'equal))))))))
 
+(cl-defun ement-put-state (room type key data session
+                                &key (then (lambda (response-data)
+                                             (ement-debug "State data put on room" response-data data room session))))
+  "Put state event of TYPE with KEY and DATA on ROOM on SESSION.
+DATA should be an alist, which will become the JSON request
+body."
+  (declare (indent defun))
+  (pcase-let* ((endpoint (format "rooms/%s/state/%s/%s"
+                                 (url-hexify-string (ement-room-id room))
+                                 type key)))
+    (ement-api session endpoint :method 'put :data (json-encode data)
+      ;; TODO: Handle error codes.
+      :then then)))
+
+(defun ement--room-routing (room)
+  "Return a list of servers to route to ROOM through."
+  ;; See <https://spec.matrix.org/v1.2/appendices/#routing>.
+  ;; FIXME: Ensure highest power level user is at least level 50.
+  ;; FIXME: Ignore servers blocked due to server ACLs.
+  ;; FIXME: Ignore servers which are IP addresses.
+  (cl-labels ((most-powerful-user-in
+               (room))
+              (servers-by-population-in
+               (room)))
+    (let (first-server-by-power-level)
+      (delete-dups
+       (remq nil
+             (list
+              ;; 1.
+              (or (when-let ((user (most-powerful-user-in room)))
+                    (setf first-server-by-power-level t)
+                    (server-of user))
+                  (car (servers-by-population-in room)))
+              ;; 2.
+              (if first-server-by-power-level
+                  (car (servers-by-population-in room))
+                (cl-second (servers-by-population-in room)))
+              ;; 3.
+              (cl-third (servers-by-population-in room))))))))
+
 ;;;; Footer
 
 (provide 'ement)

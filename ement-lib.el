@@ -790,6 +790,14 @@ USER is an `ement-user' struct."
   "Return non-nil if ROOM is a space."
   (equal "m.space" (ement-room-type room)))
 
+(defun ement--room-in-space-p (room space session)
+  "Return non-nil if ROOM is in SPACE on SESSION."
+  (pcase-let* (((cl-struct ement-session rooms) session)
+               ((cl-struct ement-room (id parent-id) (local (map children))) space)
+               ((cl-struct ement-room (id child-id) (local (map parents))) room))
+    (or (member parent-id parents)
+        (member child-id children))))
+
 (cl-defun ement--prism-color (string &key (contrast-with (face-background 'default nil 'default)))
   "Return a computed color for STRING.
 The color is adjusted to have sufficient contrast with the color
