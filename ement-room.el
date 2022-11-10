@@ -1678,8 +1678,9 @@ The message must be one sent by the local user."
                  (room ement-room)
                  (session ement-session)
                  (prompt (format "Send reply (%s): " (ement-room-display-name room)))
+                 (etc (ement-alist :replying-to-event event))
                  (body (ement-room-with-typing
-                         (ement-room-read-string prompt nil nil nil 'inherit-input-method))))
+                         (ement-room-read-string prompt nil nil nil 'inherit-input-method etc))))
       (ement-room-send-message room session :body body :replying-to-event event))))
 
 (defun ement-room-send-reaction (key position)
@@ -1948,11 +1949,18 @@ and erases the buffer."
                                          dnd-protocol-alist)))
 (add-hook 'ement-room-mode-hook 'visual-line-mode)
 
-(defun ement-room-read-string (prompt &optional initial-input history default-value inherit-input-method)
+(defvar-local ement-minibuffer-etc nil
+  "Used in composition minibuffers to store data that may be needed by compose buffers.")
+
+(defun ement-room-read-string (prompt &optional initial-input history default-value inherit-input-method etc)
   "Call `read-from-minibuffer', binding variables and keys for Ement.
 Arguments PROMPT, INITIAL-INPUT, HISTORY, DEFAULT-VALUE, and
 INHERIT-INPUT-METHOD are as those expected by `read-string',
-which see."
+which see.
+
+ETC may be an alist which is bound to `ement-minibuffer-etc' in
+the minibuffer, which may be used to store data that may be
+needed by a compose buffer, if the user activates it."
   (let ((room ement-room)
         (session ement-session))
     (minibuffer-with-setup-hook
@@ -1962,6 +1970,8 @@ which see."
           (setq-local ement-session session)
           (setq-local completion-at-point-functions
                       '(ement-room--complete-members-at-point ement-room--complete-rooms-at-point))
+          ;; (message "Setting ement-minibuffer-etc to: %S" etc)
+          (setq ement-minibuffer-etc etc)
           (visual-line-mode 1))
       (read-from-minibuffer prompt initial-input ement-room-minibuffer-map
                             nil history default-value inherit-input-method))))
@@ -3376,18 +3386,23 @@ HTML is rendered to Emacs text using `shr-insert-document'."
 (defvar-local ement-room-compose-buffer nil
   "Non-nil in buffers that are composing a message to a room.")
 
-(cl-defun ement-room-compose-message (room session &key body)
+(cl-defun ement-room-compose-message (room session &key body etc)
   "Compose a message to ROOM on SESSION.
 Interactively, compose to the current buffer's room.  With BODY,
-use it as the initial message contents."
+use it as the initial message contents.  ETC may be an alist of
+data needed when sending the message."
   (interactive (progn
                  (cl-assert ement-room) (cl-assert ement-session)
                  (list ement-room ement-session)))
   (let* ((compose-buffer (generate-new-buffer (format "*Ement compose: %s*" (ement--room-display-name ement-room))))
          (send-message-filter ement-room-send-message-filter))
     (with-current-buffer compose-buffer
+      (message "-compose-message A  IN:%S  EMENT-MINIBUFFER-ETC:%S" (current-buffer) ement-minibuffer-etc)
+      (setf ement-room-send-message-filter send-message-filter
+            ement-minibuffer-etc etc)
+      (message "-compose-message B  IN:%S  EMENT-MINIBUFFER-ETC:%S" (current-buffer) ement-minibuffer-etc)
       (ement-room-init-compose-buffer room session)
-      (setf ement-room-send-message-filter send-message-filter)
+      (message "-compose-message C  IN:%S  EMENT-MINIBUFFER-ETC:%S" (current-buffer) ement-minibuffer-etc)
       ;; TODO: Make mode configurable.
       (when body
         (insert body))
@@ -3415,18 +3430,21 @@ To be called from a minibuffer opened from
   (cl-assert (minibufferp)) (cl-assert ement-room) (cl-assert ement-session)
   ;; TODO: When requiring Emacs 27, use `letrec'.
   ;; HACK: I can't seem to find a better way to do this, to exit the minibuffer without exiting this command too.
+  (message "IN:%S  ETC:%S" (current-buffer)  ement-minibuffer-etc)
   (let* ((body (minibuffer-contents))
          (compose-fn-symbol (gensym (format "ement-compose-%s" (or (ement-room-canonical-alias ement-room)
                                                                    (ement-room-id ement-room)))))
          (input-method current-input-method) ; Capture this value from the minibuffer.
          (send-message-filter ement-room-send-message-filter)
+         (etc ement-minibuffer-etc)
          (compose-fn (lambda ()
                        ;; HACK: Since exiting the minibuffer restores the previous window configuration,
                        ;; we have to do some magic to get the new compose buffer to appear.
                        ;; TODO: Use letrec with Emacs 27.
                        (remove-hook 'minibuffer-exit-hook compose-fn-symbol)
                        ;; FIXME: Probably need to unintern the symbol.
-                       (ement-room-compose-message ement-room ement-session :body body)
+                       (message "IN-LAMBDA  IN:%S  ETC:%S" (current-buffer)  etc)
+                       (ement-room-compose-message ement-room ement-session :body body :etc etc)
 		       ;; FIXME: This doesn't propagate the send-message-filter to the minibuffer.
                        (setf ement-room-send-message-filter send-message-filter)
                        (let* ((compose-buffer (current-buffer))
@@ -3463,8 +3481,9 @@ To be called from an `ement-room-compose' buffer."
     (let* ((prompt (format "Send message (%s): " (ement-room-display-name ement-room)))
            (current-input-method input-method) ; Bind around read-string call.
            (ement-room-send-message-filter send-message-filter)
-           (body (ement-room-read-string prompt (car kill-ring) nil nil 'inherit-input-method)))
-      (ement-room-send-message ement-room ement-session :body body))))
+           (body (ement-room-read-string prompt (car kill-ring) nil nil 'inherit-input-method))
+           (replying-to-event (alist-get :replying-to-event ement-minibuffer-etc)))
+      (ement-room-send-message ement-room ement-session :body body :replying-to-event replying-to-event))))
 
 (defun ement-room-init-compose-buffer (room session)
   "Eval BODY, setting up the current buffer as a compose buffer.
@@ -3479,9 +3498,13 @@ a copy of the local keymap, and sets `header-line-format'."
                      (copy-keymap (current-local-map))
                    (make-sparse-keymap)))
   (local-set-key [remap save-buffer] #'ement-room-compose-send)
+  (message "-init-compose-buffer  IN:%S  EMENT-MINIBUFFER-ETC:%S" (current-buffer) ement-minibuffer-etc)
   (setq header-line-format (substitute-command-keys
-                            (format " Press \\[save-buffer] to send message to room (%s)"
-                                    (ement-room-display-name room)))))
+                            (format " Press \\[save-buffer] to send message to room (%s)%s"
+                                    (ement-room-display-name room)
+                                    (if-let ((replying (alist-get :replying-to-event ement-minibuffer-etc)))
+                                        " (composing reply)"
+                                      "")))))
 
 ;;;;; Widgets
 
@@ -3979,6 +4002,9 @@ the Org buffer's contents."
   (let ((room ement-room)
         (session ement-session))
     (org-mode)
+    ;; FIXME: This calls `ement-room-init-compose-buffer' a second time, after the calling
+    ;; of `org-mode' has wiped out the buffer-local variables we use to pass replying-to
+    ;; data.
     (ement-room-init-compose-buffer room session))
   (setq-local ement-room-send-message-filter #'ement-room-send-org-filter))
 
