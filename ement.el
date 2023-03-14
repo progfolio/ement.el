@@ -843,7 +843,8 @@ Around the BODY, the variable `event' is bound to the event being
 processed, `room' to the room struct in which the event occurred,
 and `session' to the session.  Adds function to
 `ement-event-handlers', which see."
-  (declare (indent defun))
+  (declare (indent defun)
+           (debug (stringp def-body)))
   `(setf (alist-get ,type ement-event-handlers nil nil #'string=)
          (lambda (event room session)
            ,(concat "`ement-' handler function for " type " events.")
