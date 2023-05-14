@@ -3653,24 +3653,27 @@ To be called from an `ement-room-compose' buffer."
       (ement-room-send-message ement-room ement-session :body body :replying-to-event replying-to-event))))
 
 (defun ement-room-init-compose-buffer (room session)
-  "Eval BODY, setting up the current buffer as a compose buffer.
-Sets ROOM and SESSION buffer-locally, binds `save-buffer' in
-a copy of the local keymap, and sets `header-line-format'."
-  ;; Using a macro for this seems awkward but necessary.
+  "Set the current buffer as a compose buffer for ROOM and SESSION."
+  (ement-compose-mode)
   (setq-local ement-room room)
-  (setq-local ement-session session)
+  (setq-local ement-session session))
+
+(define-derived-mode ement-compose-mode text-mode "Ement-Compose"
+  "Major mode for composing messages to `ement' rooms."
+  :interactive nil
   (setf ement-room-compose-buffer t)
   (setq-local completion-at-point-functions
               (append '(ement-room--complete-members-at-point ement-room--complete-rooms-at-point)
                       completion-at-point-functions))
-  ;; FIXME: Compose with local map?
-  (use-local-map (if (current-local-map)
-                     (copy-keymap (current-local-map))
-                   (make-sparse-keymap)))
-  (local-set-key [remap save-buffer] #'ement-room-compose-send)
-  (setq header-line-format (substitute-command-keys
-                            (format " Press \\[save-buffer] to send message to room (%s)"
-                                    (ement-room-display-name room)))))
+  (setq header-line-format '(:eval (substitute-command-keys
+                                    (format " Press \\[save-buffer] to send message to room (%s)"
+                                            (ement-room-display-name ement-room))))))
+
+(defvar ement-compose-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [remap save-buffer] #'ement-room-compose-send)
+    map)
+  "Map for `ement-compose-mode' buffers.")
 
 ;;;;; Widgets
 
