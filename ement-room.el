@@ -215,6 +215,7 @@ In that case, sender names are aligned to the margin edge.")
 (defvar ement-notify-limit-room-name-width)
 (defvar ement-view-room-display-buffer-action)
 (defvar ement-user-avatars-enabled)
+(defvar ement-user-avatars-height-factor)
 
 ;; Defined in Emacs 28.1: silence byte-compilation warning in earlier versions.
 (defvar browse-url-handlers)
@@ -236,6 +237,20 @@ In that case, sender names are aligned to the margin edge.")
   "Functions called when `ement-room-view' is called.
 Called with two arguments, the room and the session."
   :type 'hook)
+
+;; These two options are defined here, despite their group, because
+;; `ement-room-message-format-spec-setter' uses them, and having them defined elsewhere
+;; causes a compilation error.
+
+(defcustom ement-user-avatars-enabled t
+  "Download and show user avatars."
+  :type 'boolean
+  :group 'ement)
+
+(defcustom ement-user-avatars-height-factor 1
+  "Render user avatars at the `frame-char-height' multiplied by this."
+  :type 'number
+  :group 'ement)
 
 ;;;;; Faces
 
